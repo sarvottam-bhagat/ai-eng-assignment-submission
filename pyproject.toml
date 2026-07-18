@@ -13,3 +13,13 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "requests>=2.32.5",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+# Only the offline unit tests — src/test_pipeline.py is a live smoke script,
+# not a pytest suite (it makes real OpenAI calls)
+testpaths = ["tests"]

@@ -20,29 +20,38 @@ from .enhanced_recipe_generator import EnhancedRecipeGenerator
 from .models import EnhancedRecipe, Recipe, Review
 from .recipe_modifier import RecipeModifier
 from .tweak_extractor import TweakExtractor
+from .validation import filter_valid_modifications
 
 
 class LLMAnalysisPipeline:
     """Complete pipeline for analyzing recipes and generating enhanced versions."""
 
+    # Repo root = two levels up from this file (src/llm_pipeline/pipeline.py)
+    REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
     def __init__(
         self,
         openai_api_key: Optional[str] = None,
-        output_dir: str = "data/enhanced",
-        pipeline_version: str = "1.0.0",
+        output_dir: Optional[str] = None,
+        pipeline_version: str = "1.1.0",
     ):
         """
         Initialize the complete LLM Analysis Pipeline.
 
         Args:
             openai_api_key: OpenAI API key (loads from env if not provided)
-            output_dir: Directory to save enhanced recipes
+            output_dir: Directory to save enhanced recipes. Defaults to
+                <repo_root>/data/enhanced regardless of current working
+                directory, so outputs always land in one place.
             pipeline_version: Version identifier for tracking
         """
         # Load environment variables
         load_dotenv()
 
-        self.output_dir = Path(output_dir)
+        if output_dir is None:
+            self.output_dir = self.REPO_ROOT / "data" / "enhanced"
+        else:
+            self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize pipeline components
@@ -86,6 +95,10 @@ class LLMAnalysisPipeline:
             description=recipe_data.get("description"),
             servings=recipe_data.get("servings"),
             rating=recipe_data.get("rating"),
+            # Source JSON uses preptime/cooktime/totaltime
+            prep_time=recipe_data.get("preptime"),
+            cook_time=recipe_data.get("cooktime"),
+            total_time=recipe_data.get("totaltime"),
         )
 
     def parse_reviews_data(self, recipe_data: Dict[str, Any]) -> List[Review]:
@@ -143,35 +156,49 @@ class LLMAnalysisPipeline:
                 logger.warning("No reviews with modifications found")
                 return None
 
-            # Step 1: Extract modification from one random review
-            logger.info("Step 1: Extracting modification from a single review...")
-            modification, source_review = (
-                self.tweak_extractor.extract_single_modification(reviews, recipe)
+            # Step 1: Extract atomic modifications from ALL flagged reviews
+            logger.info("Step 1: Extracting modifications from all flagged reviews...")
+            extractions = self.tweak_extractor.extract_all_modifications(
+                reviews, recipe
             )
 
-            if not modification or not source_review:
-                logger.warning("No modification could be extracted")
+            if not extractions:
+                logger.warning("No modifications could be extracted")
                 return None
 
-            logger.info(
-                f"Successfully extracted {modification.modification_type} modification"
+            logger.info(f"Extracted {len(extractions)} atomic modifications")
+
+            # Step 1b: Deterministic validation (reject hypothetical/vague/malformed)
+            logger.info("Step 1b: Validating extracted modifications...")
+            valid_extractions = filter_valid_modifications(extractions)
+
+            if not valid_extractions:
+                logger.warning("No modifications survived validation")
+                return None
+
+            # Step 2: Apply valid modifications with conflict/duplicate handling
+            logger.info("Step 2: Applying modifications to recipe...")
+            modified_recipe, applied_modifications = (
+                self.recipe_modifier.apply_modifications(recipe, valid_extractions)
             )
 
-            # Step 2: Apply modification to recipe
-            logger.info("Step 2: Applying modification to recipe...")
-            modified_recipe, change_records = self.recipe_modifier.apply_modification(
-                recipe, modification
-            )
+            if not applied_modifications:
+                logger.warning("No modifications could be applied to the recipe")
+                return None
 
+            total_changes = sum(
+                len(records) for _, _, records in applied_modifications
+            )
             logger.info(
-                f"Applied modification: {len(change_records)} total changes made"
+                f"Applied {len(applied_modifications)} modifications: "
+                f"{total_changes} total changes made"
             )
 
             # Step 3: Generate enhanced recipe with attribution
             logger.info("Step 3: Generating enhanced recipe with attribution...")
 
             enhanced_recipe = self.enhanced_generator.generate_enhanced_recipe(
-                recipe, modified_recipe, modification, source_review, change_records
+                recipe, modified_recipe, applied_modifications
             )
 
             logger.info(f"Generated enhanced recipe: {enhanced_recipe.title}")
@@ -250,9 +277,9 @@ class LLMAnalysisPipeline:
 
         change_type_counts = {}
         for recipe in enhanced_recipes:
-            for change_type in recipe.enhancement_summary.change_types:
-                change_type_counts[change_type] = (
-                    change_type_counts.get(change_type, 0) + 1
+            for mod in recipe.modifications_applied:
+                change_type_counts[mod.modification_type] = (
+                    change_type_counts.get(mod.modification_type, 0) + 1
                 )
 
         report = {

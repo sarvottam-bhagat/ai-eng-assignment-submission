@@ -21,6 +21,10 @@ from loguru import logger
 # Load environment variables from .env file
 load_dotenv()
 
+# Anchor data paths to the repo root so the script works from any CWD
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = REPO_ROOT / "data"
+
 
 def test_single_recipe():
     """Test the pipeline with the chocolate chip cookie recipe."""
@@ -40,7 +44,7 @@ def test_single_recipe():
         return False
 
     # Test with chocolate chip cookie recipe
-    recipe_file = "../data/recipe_10813_best-chocolate-chip-cookies.json"
+    recipe_file = str(DATA_DIR / "recipe_10813_best-chocolate-chip-cookies.json")
     if not Path(recipe_file).exists():
         logger.error(f"Recipe file not found: {recipe_file}")
         return False
@@ -90,20 +94,39 @@ def test_all_recipes():
         return False
 
     try:
+        # Count recipes that are actually eligible (have modification reviews)
+        import json as _json
+
+        eligible = 0
+        for f in sorted(DATA_DIR.glob("recipe_*.json")):
+            with open(f, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            if any(r.get("has_modification") for r in data.get("reviews", [])):
+                eligible += 1
+
         # Process all recipes
         enhanced_recipes = pipeline.process_recipe_directory(
-            data_dir="../data"
+            data_dir=str(DATA_DIR)
         )
 
         # Generate summary report
         report_path = pipeline.save_summary_report(enhanced_recipes)
 
         logger.info(f"\n{'=' * 60}")
-        logger.success("✓ All recipes test complete!")
-        logger.info(f"Enhanced recipes: {len(enhanced_recipes)}")
+        logger.info(f"Eligible recipes (with modification reviews): {eligible}")
+        logger.info(f"Enhanced recipes produced: {len(enhanced_recipes)}")
         logger.info(f"Summary report saved to: {report_path}")
 
-        return len(enhanced_recipes) > 0
+        # Note: a recipe whose reviews are all hypothetical/vague is correctly
+        # skipped, so we require most (not all) eligible recipes to succeed and
+        # flag any shortfall loudly instead of passing on a single success.
+        if len(enhanced_recipes) < eligible:
+            logger.warning(
+                f"{eligible - len(enhanced_recipes)} eligible recipe(s) produced "
+                f"no output — check logs above for rejection reasons"
+            )
+
+        return len(enhanced_recipes) >= max(1, eligible - 1)
 
     except Exception as e:
         logger.error(f"All recipes test failed with error: {e}")

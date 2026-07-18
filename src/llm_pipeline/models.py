@@ -45,6 +45,18 @@ class ModificationObject(BaseModel):
     edits: List[ModificationEdit] = Field(description="List of atomic edits to apply")
 
 
+class ExtractionResponse(BaseModel):
+    """LLM response wrapper: one review can yield multiple atomic modifications."""
+
+    modifications: List[ModificationObject] = Field(
+        default_factory=list,
+        description=(
+            "Every distinct, actually-tested modification found in the review. "
+            "Empty when the review contains no qualifying tested modification."
+        ),
+    )
+
+
 class SourceReview(BaseModel):
     """Reference to the original review that suggested the modification."""
 
@@ -132,7 +144,9 @@ class Recipe(BaseModel):
     description: Optional[str] = None
     servings: Optional[str] = None
     rating: Optional[Dict[str, Any]] = None
-    # Include other fields as needed
+    prep_time: Optional[str] = None
+    cook_time: Optional[str] = None
+    total_time: Optional[str] = None
 
 
 class Review(BaseModel):

@@ -39,6 +39,7 @@ uv run python src/scraper_v2.py
 ### 2. Run Recipe Enhancement Pipeline
 
 ```bash
+# Works from any directory — paths are anchored to the repo root
 cd src
 
 # Test single recipe (chocolate chip cookies)
@@ -52,7 +53,7 @@ uv run python test_pipeline.py all
 
 ### Enhanced Recipes
 
-Enhanced recipes are saved in `src/data/enhanced/`:
+Enhanced recipes are saved in `data/enhanced/` (at the repo root):
 
 - `enhanced_[recipe_id]_[recipe-name].json` - Individual enhanced recipes with modifications applied
 - `pipeline_summary_report.json` - Summary of all processing results
@@ -89,11 +90,21 @@ Original scraped recipes in `data/` directory contain reviews with `has_modifica
 
 The LLM Analysis Pipeline processes recipes in 3 steps:
 
-1. **Tweak Extraction**: Selects one random review with modifications and uses GPT-4o-mini to extract structured changes
-2. **Recipe Modification**: Applies changes to the original recipe using fuzzy string matching
-3. **Enhanced Recipe Generation**: Creates enhanced version with full citation tracking back to source review
+1. **Tweak Extraction**: Processes **every** review flagged with modifications; GPT-4o-mini extracts a **list of atomic modifications** per review (one review saying "added an egg and halved sugar" yields two separate attributed tweaks)
+2. **Validation**: Deterministic rules reject untested suggestions ("next time I will…"), vague amounts ("use more broth"), and prose masquerading as recipe lines — before anything touches the recipe
+3. **Recipe Modification**: Applies validated changes with safe matching (exact → normalized → unique substring; never fuzzy overwrites), duplicate collapse, and first-wins conflict detection
+4. **Enhanced Recipe Generation**: Creates the enhanced version with one citation per atomic modification, tracking back to the source review
 
-Each run produces one enhanced recipe per original recipe, with complete attribution showing exactly what changed and why.
+Each run produces one enhanced recipe per eligible original recipe. A recipe whose reviews contain no genuinely tested change correctly produces no output.
+
+## Testing
+
+```bash
+# Offline unit tests — no API key needed
+uv run pytest
+```
+
+See [`ANALYSIS.md`](ANALYSIS.md) for the full write-up: original failure modes, fixes, verification, and future improvements.
 
 ## Development
 

@@ -87,7 +87,10 @@ class EnhancedRecipeGenerator:
             EnhancementSummary with aggregate statistics
         """
         total_changes = sum(len(mod.changes_made) for mod in modifications_applied)
-        change_types = list(set(mod.modification_type for mod in modifications_applied))
+        # Deduplicate while preserving order (deterministic across runs)
+        change_types = list(
+            dict.fromkeys(mod.modification_type for mod in modifications_applied)
+        )
 
         # Generate expected impact summary
         impact_descriptions = []
@@ -112,30 +115,27 @@ class EnhancedRecipeGenerator:
         self,
         original_recipe: Recipe,
         modified_recipe: Recipe,
-        modification: ModificationObject,
-        source_review: Review,
-        change_records: List[ChangeRecord],
+        applied_modifications: List[tuple[ModificationObject, Review, List[ChangeRecord]]],
     ) -> EnhancedRecipe:
         """
         Generate a complete enhanced recipe with attribution.
 
         Args:
             original_recipe: Original unmodified recipe
-            modified_recipe: Recipe with modifications applied
-            modification: Single modification that was applied
-            source_review: Review that suggested the modification
-            change_records: Changes made for the modification
+            modified_recipe: Recipe with all modifications applied
+            applied_modifications: List of (modification, source_review, change_records)
+                tuples, one per modification that was applied
 
         Returns:
             Complete EnhancedRecipe with attribution
         """
         logger.info(f"Generating enhanced recipe for: {original_recipe.title}")
 
-        # Create modification applied record
-        modification_applied = self.create_modification_applied(
-            modification, source_review, change_records
-        )
-        modifications_applied = [modification_applied]
+        # Create one attribution record per applied modification
+        modifications_applied = [
+            self.create_modification_applied(modification, source_review, change_records)
+            for modification, source_review, change_records in applied_modifications
+        ]
 
         # Calculate enhancement summary
         enhancement_summary = self.calculate_enhancement_summary(modifications_applied)
@@ -155,9 +155,9 @@ class EnhancedRecipeGenerator:
             enhancement_summary=enhancement_summary,
             description=original_recipe.description,
             servings=original_recipe.servings,
-            prep_time=getattr(original_recipe, "prep_time", None),
-            cook_time=getattr(original_recipe, "cook_time", None),
-            total_time=getattr(original_recipe, "total_time", None),
+            prep_time=original_recipe.prep_time,
+            cook_time=original_recipe.cook_time,
+            total_time=original_recipe.total_time,
             created_at=datetime.now().isoformat(),
             pipeline_version=self.pipeline_version,
         )

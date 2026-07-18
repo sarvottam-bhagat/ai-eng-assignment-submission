@@ -8,11 +8,12 @@ modifications from user review text.
 SYSTEM_PROMPT = """You are an expert recipe analyst. Your job is to extract structured recipe modifications from user reviews.
 
 When a user shares their experience modifying a recipe, you need to:
-1. Identify exactly what changes they made
-2. Understand why they made those changes
-3. Convert their modifications into structured edit operations
+1. Identify EVERY distinct change they actually made (a single review often contains several)
+2. Understand why they made each change
+3. Convert each change into its own structured modification with edit operations
 
-You must output valid JSON that matches the ModificationObject schema.
+You must output valid JSON with a "modifications" list. Each list item is ONE atomic
+conceptual tweak (e.g. "added an egg and halved the sugar" = TWO separate modifications).
 
 Categories:
 - "ingredient_substitution": Replacing one ingredient with another
@@ -26,7 +27,17 @@ Edit operations:
 - "add_after": Add new text after finding target text
 - "remove": Remove text that matches the find pattern
 
-Be precise with text matching - use the exact text from the original recipe when possible."""
+STRICT RULES — violating any of these makes the output unusable:
+- Only include changes the reviewer says they ACTUALLY made and tested. Exclude future
+  intentions ("next time I will..."), preferences ("I would prefer..."), or suggestions
+  they did not try themselves.
+- Never invent a quantity, ingredient, temperature, or duration the reviewer did not
+  state. If the reviewer was vague ("use more broth", "add more apples") and gave no
+  amount, DO NOT include that change at all.
+- For "find", copy the EXACT text of the matching line from the original recipe.
+- Replacement/added text must be a complete, well-formed recipe line (an ingredient
+  with a quantity, or an instruction step) — never review prose or advice.
+- If the review contains no qualifying tested modification, return {"modifications": []}."""
 
 EXTRACTION_PROMPT = """Original Recipe:
 Title: {title}
@@ -195,31 +206,40 @@ Now extract from this review:
 def build_simple_prompt(
     review_text: str, title: str, ingredients: list, instructions: list
 ) -> str:
-    """Build a simple prompt without examples for faster processing."""
+    """Build the extraction prompt for atomic multi-modification output."""
+    ingredients_text = "\n".join(f"- {i}" for i in ingredients)
+    instructions_text = "\n".join(f"- {i}" for i in instructions)
+
     return f"""{SYSTEM_PROMPT}
 
 Original Recipe:
 Title: {title}
-Ingredients: {ingredients}
-Instructions: {instructions}
+Ingredients:
+{ingredients_text}
+Instructions:
+{instructions_text}
 
 User Review: "{review_text}"
 
-Extract the recipe modifications from this review. The user has made changes to improve the recipe.
+Extract every distinct modification the reviewer actually made, one list item each.
 
 Output a JSON object with this structure:
 {{
-    "modification_type": "quantity_adjustment|ingredient_substitution|technique_change|addition|removal",
-    "reasoning": "Brief explanation of why this modification improves the recipe",
-    "edits": [
+    "modifications": [
         {{
-            "target": "ingredients|instructions",
-            "operation": "replace|add_after|remove",
-            "find": "exact text to find",
-            "replace": "replacement text (for replace operations)",
-            "add": "text to add (for add_after operations)"
+            "modification_type": "quantity_adjustment|ingredient_substitution|technique_change|addition|removal",
+            "reasoning": "Brief explanation of why this modification improves the recipe",
+            "edits": [
+                {{
+                    "target": "ingredients|instructions",
+                    "operation": "replace|add_after|remove",
+                    "find": "exact text to find",
+                    "replace": "replacement text (for replace operations)",
+                    "add": "text to add (for add_after operations)"
+                }}
+            ]
         }}
     ]
 }}
 
-Focus on concrete changes the user actually made, not general suggestions."""
+Return {{"modifications": []}} if the review contains no concrete, actually-tested change."""
