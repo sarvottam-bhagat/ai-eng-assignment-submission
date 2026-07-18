@@ -48,6 +48,13 @@ if st.button("🎲 Run Original Pipeline", type="primary"):
     c2.metric("Reviews with modifications", len(mod_reviews))
     c3.metric("Reviews actually used", "1 (random!)" if mod_reviews else "0")
 
+    with st.expander(f"📋 All {len(reviews)} reviews (dekho kya-kya available tha)"):
+        for i, r in enumerate(reviews, 1):
+            tag = "🔧 HAS MODIFICATION" if r.has_modification else "💬 no modification"
+            st.markdown(f"**Review {i}** — {tag}")
+            st.caption(r.text)
+            st.divider()
+
     if not mod_reviews:
         st.error("No modification reviews scraped for this recipe.")
         st.stop()
@@ -70,7 +77,23 @@ if st.button("🎲 Run Original Pipeline", type="primary"):
         st.stop()
 
     st.subheader("🎲 Randomly selected review")
+    st.caption(
+        "Ye selection `random.choice()` (Python) karta hai — LLM nahi. "
+        "Code pehle lottery se ek review chunta hai, USKE BAAD LLM ko sirf "
+        "wahi ek review padhne bhejta hai."
+    )
     st.info(source_review.text)
+
+    discarded = [r for r in mod_reviews if r.text != source_review.text]
+    if discarded:
+        with st.expander(
+            f"🗑️ {len(discarded)} modification reviews DISCARD ho gayi (LLM ne "
+            f"inhe kabhi dekha hi nahi)"
+        ):
+            for i, r in enumerate(discarded, 1):
+                st.markdown(f"**Discarded review {i}:**")
+                st.caption(r.text)
+                st.divider()
 
     st.subheader(f"Extracted: 1 modification ({modification.modification_type})")
     st.warning(
