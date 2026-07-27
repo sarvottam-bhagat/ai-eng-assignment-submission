@@ -1,117 +1,105 @@
 # Recipe Enhancement Platform
 
-Automatically enhances recipes by analyzing and applying community-tested modifications from AllRecipes.com. Uses LLM processing to extract meaningful recipe tweaks and apply them with full citation tracking.
+This project turns community-tested AllRecipes review suggestions into an enhanced recipe. It uses an LLM to extract individual recipe changes, validates them with deterministic safety checks, and records the source review for every applied change.
 
-## Installation
+The repository includes a Streamlit demo, the pipeline, sample recipe data, and an offline test suite.
 
-This project uses [`uv`](https://docs.astral.sh/uv/) for fast, reliable Python package management.
+## Requirements
 
-### Prerequisites
-
-- Python 3.13+
-- `uv` package manager
+- Python 3.13 or newer
+- [uv](https://docs.astral.sh/uv/)
+- An OpenAI API key to run the Streamlit app or the live pipeline
 
 ## Setup
 
-```bash
-# Install dependencies
-uv venv
-source .venv/bin/activate
-uv pip sync pyproject.toml
+Run these commands from the repository root.
+
+```powershell
+# Install the project and development dependencies
+uv sync
 ```
 
-### Environment Variables
-
-Create a `.env` file in the project root:
+Create a file named `.env` in the repository root:
 
 ```env
-OPENAI_API_KEY=your-openai-api-key-here
+OPENAI_API_KEY=your_openai_api_key_here
 ```
 
-## Usage
+The API key is required only for commands that call OpenAI. The automated test suite runs entirely offline.
 
-### 1. Scrape Recipes (Optional - data already provided)
+## Run the application
 
-```bash
-uv run python src/scraper_v2.py
+Start the interactive Streamlit demo:
+
+```powershell
+uv run streamlit run app.py
 ```
 
-### 2. Run Recipe Enhancement Pipeline
+Open the local URL printed by Streamlit. Choose a recipe and select **Run the fixed pipeline** to see:
 
-```bash
-# Works from any directory — paths are anchored to the repo root
-cd src
+1. Every review containing a suggested modification
+2. The individual changes extracted from each review
+3. Validation rejections and their reasons
+4. Safe application, duplicate handling, and conflict handling
+5. The enhanced recipe alongside the original, with review attribution
 
-# Test single recipe (chocolate chip cookies)
-uv run python test_pipeline.py single
+## Run the pipeline from the command line
 
-# Process all recipes
-uv run python test_pipeline.py all
+These commands make real OpenAI API calls and require `OPENAI_API_KEY` in `.env`.
+
+```powershell
+# Process the chocolate-chip-cookie sample
+uv run python src/test_pipeline.py single
+
+# Process every sample recipe that has review data
+uv run python src/test_pipeline.py all
 ```
 
-## Output
+Enhanced recipes and the batch summary are written to `data/enhanced/`, regardless of the directory from which the command is run. Running the live pipeline can update the tracked sample output files in that directory.
 
-### Enhanced Recipes
+## Run tests
 
-Enhanced recipes are saved in `data/enhanced/` (at the repo root):
+Run the deterministic offline test suite (no API key or network access required):
 
-- `enhanced_[recipe_id]_[recipe-name].json` - Individual enhanced recipes with modifications applied
-- `pipeline_summary_report.json` - Summary of all processing results
-
-### Data Structure
-
-Original scraped recipes in `data/` directory contain reviews with `has_modification: true` flags. Enhanced recipes include:
-
-```json
-{
-  "recipe_id": "10813_enhanced",
-  "title": "Best Chocolate Chip Cookies (Community Enhanced)",
-  "ingredients": ["1 cup butter", "1 additional egg yolk", ...],
-  "modifications_applied": [
-    {
-      "source_review": {
-        "text": "I added an extra egg yolk for chewier texture",
-        "rating": 5
-      },
-      "modification_type": "addition",
-      "reasoning": "Improves texture and chewiness",
-      "changes_made": [...]
-    }
-  ],
-  "enhancement_summary": {
-    "total_changes": 1,
-    "change_types": ["addition"],
-    "expected_impact": "Chewier texture and improved consistency"
-  }
-}
-```
-
-## How It Works
-
-The LLM Analysis Pipeline processes recipes in 3 steps:
-
-1. **Tweak Extraction**: Processes **every** review flagged with modifications; GPT-4o-mini extracts a **list of atomic modifications** per review (one review saying "added an egg and halved sugar" yields two separate attributed tweaks)
-2. **Validation**: Deterministic rules reject untested suggestions ("next time I will…"), vague amounts ("use more broth"), and prose masquerading as recipe lines — before anything touches the recipe
-3. **Recipe Modification**: Applies validated changes with safe matching (exact → normalized → unique substring; never fuzzy overwrites), duplicate collapse, and first-wins conflict detection
-4. **Enhanced Recipe Generation**: Creates the enhanced version with one citation per atomic modification, tracking back to the source review
-
-Each run produces one enhanced recipe per eligible original recipe. A recipe whose reviews contain no genuinely tested change correctly produces no output.
-
-## Testing
-
-```bash
-# Offline unit tests — no API key needed
+```powershell
 uv run pytest
 ```
 
-See [`ANALYSIS.md`](ANALYSIS.md) for the full write-up: original failure modes, fixes, verification, and future improvements.
+## Optional: refresh the source data
 
-## Development
+The repository already includes sample recipe data. To scrape it again:
 
-```bash
-# Add dependencies
-uv add <package_name>
-
-# Run tests
-cd src && uv run python test_pipeline.py single
+```powershell
+uv run python src/scraper_v2.py
 ```
+
+## What was fixed
+
+The original implementation could generate unreliable recipes: it selected one modification review at random, treated a whole review as one change, and applied LLM output without enough safety checks. The following fixes are now in place:
+
+| Area | Before | Now |
+| --- | --- | --- |
+| Review coverage | One random flagged review was processed | All flagged reviews are processed in a stable order |
+| Changes per review | One review was forced into one modification | Reviews can yield multiple atomic, separately attributed modifications |
+| Unsafe suggestions | Untested, vague, or malformed suggestions could be applied | Deterministic validation rejects hypothetical, vague, prose-like, and incomplete changes with a reason |
+| Recipe matching | Fuzzy matching could target the wrong line or report a change that did not occur | Matching uses exact, normalized, then unique-substring resolution; ambiguous or missing targets are skipped |
+| Conflicts and duplicates | Later changes could silently overwrite earlier ones | Conflicts use a deterministic first-wins policy; duplicate additions are applied once |
+| Attribution | A change record could exist even when no recipe text changed | Records are written only for verified changes and retain the source review |
+| Recipe metadata | Prep, cook, and total times were dropped | Source timing metadata is preserved |
+| Output location | Output depended on the current working directory | Output is always anchored to `data/enhanced/` at the repository root |
+| Quality checks | No offline regression suite | Offline pytest coverage verifies extraction parsing, validation, matching safety, conflicts, duplicates, attribution, metadata, and summaries |
+
+The system intentionally produces no enhanced recipe when the available reviews contain no concrete, tested modification. It also skips recipes with no scraped reviews instead of inventing changes.
+
+## Project layout
+
+```text
+app.py                  Streamlit demonstration UI
+src/llm_pipeline/       Extraction, validation, recipe editing, and output generation
+src/test_pipeline.py    Live single-recipe and batch pipeline runner
+tests/                  Offline regression tests
+data/                   Input recipes and generated enhanced recipes
+data/enhanced/          Generated recipe JSON and batch summary report
+```
+
+For the detailed engineering analysis, validation rationale, and known limitations, see [ANALYSIS.md](ANALYSIS.md).
