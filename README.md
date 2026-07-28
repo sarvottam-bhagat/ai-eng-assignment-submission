@@ -30,6 +30,16 @@ OPENAI_API_KEY=your-openai-api-key-here
 
 ## Usage
 
+### Run the Streamlit App
+
+From the project root, start the app with:
+
+```bash
+uv run streamlit run app.py
+```
+
+Open the local URL shown in the terminal (usually `http://localhost:8501`).
+
 ### 1. Scrape Recipes (Optional - data already provided)
 
 ```bash
